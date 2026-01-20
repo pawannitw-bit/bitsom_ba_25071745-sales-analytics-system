@@ -1,71 +1,111 @@
-"""
-File Handler for Sales Analytics System
-Handles file I/O, validation, and filtering operations
-"""
-
-import codecs
-
-def read_file(file_path):
+def read_sales_data(filename):
     """
-    Read pipe-delimited file with proper encoding handling
-    Returns list of lines
+    Reads sales data from file handling encoding issues
+
+    Returns: list of raw lines (strings)
+
+    Expected Output Format:
+    ['T001|2024-12-01|P101|Laptop|2|45000|C001|North', ...]
+
+    Requirements:
+    - Use 'with' statement
+    - Handle different encodings (try 'utf-8', 'latin-1', 'cp1252')
+    - Handle FileNotFoundError with appropriate error message
+    - Skip the header row
+    - Remove empty lines
     """
+
     try:
-        # Try UTF-8 first
-        with open(file_path, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
-        print(f"✓ File read successfully with UTF-8 encoding")
-        return lines
-    except UnicodeDecodeError:
-        # Fallback to other encodings
-        encodings = ['latin-1', 'cp1252', 'iso-8859-1']
-        for encoding in encodings:
-            try:
-                with open(file_path, 'r', encoding=encoding) as f:
-                    lines = f.readlines()
-                print(f"✓ File read successfully with {encoding} encoding")
-                return lines
-            except UnicodeDecodeError:
-                continue
-        raise Exception("Unable to decode file with any known encoding")
+        with open(filename, 'r', encoding='cp1252') as file:
+            lines = file.readlines()
+            final_line = []
+            for line in lines:
+               if line.strip() == '':
+                   continue
+               final_line.append(line)
+            return final_line[1:]
+    except FileNotFoundError:
+        print(f"Error: The file {filename} was not found.")
+        return []
+    
 
-def write_file(file_path, lines):
+def parse_transactions(raw_lines):
     """
-    Write cleaned data to file in UTF-8 encoding
-    """
-    with open(file_path, 'w', encoding='utf-8') as f:
-        f.writelines(lines)
-    print(f"✓ File written successfully to {file_path}")
+    Parses raw lines into clean list of dictionaries
 
-def parse_line(line):
-    """
-    Parse pipe-delimited line into fields
-    """
-    return [field.strip() for field in line.strip().split('|')]
+    Returns: list of dictionaries with keys:
+    ['TransactionID', 'Date', 'ProductID', 'ProductName',
+     'Quantity', 'UnitPrice', 'CustomerID', 'Region']
 
-def create_line(fields):
-    """
-    Create pipe-delimited line from fields
-    """
-    return '|'.join(fields) + '\n'
+    Expected Output Format:
+    [
+        {
+            'TransactionID': 'T001',
+            'Date': '2024-12-01',
+            'ProductID': 'P101',
+            'ProductName': 'Laptop',
+            'Quantity': 2,           # int type
+            'UnitPrice': 45000.0,    # float type
+            'CustomerID': 'C001',
+            'Region': 'North'
+        },
+        ...
+    ]
 
+    Requirements:
+    - Split by pipe delimiter '|'
+    - Handle commas within ProductName (remove or replace)
+    - Remove commas from numeric fields and convert to proper types
+    - Convert Quantity to int
+    - Convert UnitPrice to float
+    - Skip rows with incorrect number of fields
+    """
 
-# ============================================================================
-# TASK 11c: Data Validation and Filtering
-# ============================================================================
+    transactions = []
+    for line in raw_lines:
+        parts = line.strip().split('|')
+        if len(parts) != 8:
+            continue
+
+        transaction_id = parts[0]
+        date = parts[1]
+        product_id = parts[2]
+        product_name = parts[3].replace(',', ' ')
+        customer_id = parts[6]
+        region = parts[7]
+        try:
+            quantity = int(parts[4].replace(',', ''))
+            unit_price = float(parts[5].replace(',', ''))
+        except ValueError:
+            continue
+
+        transaction = {
+            'TransactionID': transaction_id,
+            'Date': date,
+            'ProductID': product_id,
+            'ProductName': product_name,
+            'Quantity': quantity,
+            'UnitPrice': unit_price,
+            'CustomerID': customer_id,
+            'Region': region
+        }
+        transactions.append(transaction)
+
+    return transactions
+
 
 def validate_and_filter(transactions, region=None, min_amount=None, max_amount=None):
     """
     Validates transactions and applies optional filters
-    
+
     Parameters:
     - transactions: list of transaction dictionaries
     - region: filter by specific region (optional)
     - min_amount: minimum transaction amount (Quantity * UnitPrice) (optional)
     - max_amount: maximum transaction amount (optional)
-    
+
     Returns: tuple (valid_transactions, invalid_count, filter_summary)
-    
+
     Expected Output Format:
     (
         [list of valid filtered transactions],
@@ -78,7 +118,7 @@ def validate_and_filter(transactions, region=None, min_amount=None, max_amount=N
             'final_count': 65
         }
     )
-    
+
     Validation Rules:
     - Quantity must be > 0
     - UnitPrice must be > 0
@@ -86,199 +126,78 @@ def validate_and_filter(transactions, region=None, min_amount=None, max_amount=N
     - TransactionID must start with 'T'
     - ProductID must start with 'P'
     - CustomerID must start with 'C'
-    
+
     Filter Display:
     - Print available regions to user before filtering
     - Print transaction amount range (min/max) to user
     - Show count of records after each filter applied
     """
-    
     valid_transactions = []
     invalid_count = 0
-    
-    # Initialize filter summary
     filter_summary = {
         'total_input': len(transactions),
-        'invalid': 0,
+        'invalid': invalid_count,
         'filtered_by_region': 0,
         'filtered_by_amount': 0,
         'final_count': 0
     }
-    
-    # Step 1: Validate transactions
-    print("\n" + "="*50)
-    print("VALIDATION AND FILTERING")
-    print("="*50)
-    
-    validated_transactions = []
-    
-    for transaction in transactions:
-        is_valid, reason = validate_transaction(transaction)
-        
-        if is_valid:
-            validated_transactions.append(transaction)
-        else:
-            invalid_count += 1
-            print(f"Invalid: {reason} - {transaction.get('TransactionID', 'Unknown')}")
-    
+
+    invalid_count, valid_transactions = get_valid_transaction(transactions=transactions)
+
     filter_summary['invalid'] = invalid_count
-    print(f"\n✓ Valid transactions after validation: {len(validated_transactions)}")
+
+    if region:
+        before_filtering = len(valid_transactions)
+        valid_transactions = get_trnsaction_by_region(region, valid_transactions)
+        filter_summary['filtered_by_region'] = before_filtering - len(valid_transactions)
     
-    # Step 2: Display available regions (before filtering)
-    if region is not None:
-        available_regions = get_available_regions(validated_transactions)
-        print(f"\nAvailable regions: {', '.join(available_regions)}")
-    
-    # Step 3: Display transaction amount range
+
     if min_amount is not None or max_amount is not None:
-        amount_range = get_transaction_amount_range(validated_transactions)
-        print(f"\nTransaction amount range: ${amount_range['min']:.2f} - ${amount_range['max']:.2f}")
-    
-    # Step 4: Apply region filter
-    if region is not None:
-        before_count = len(validated_transactions)
-        validated_transactions = filter_by_region(validated_transactions, region)
-        filtered_count = before_count - len(validated_transactions)
-        filter_summary['filtered_by_region'] = filtered_count
-        print(f"\n✓ After region filter ('{region}'): {len(validated_transactions)} records")
-    
-    # Step 5: Apply amount filter
-    if min_amount is not None or max_amount is not None:
-        before_count = len(validated_transactions)
-        validated_transactions = filter_by_amount(validated_transactions, min_amount, max_amount)
-        filtered_count = before_count - len(validated_transactions)
-        filter_summary['filtered_by_amount'] = filtered_count
-        print(f"✓ After amount filter: {len(validated_transactions)} records")
-    
-    filter_summary['final_count'] = len(validated_transactions)
-    
-    return (validated_transactions, invalid_count, filter_summary)
+        valid_transactions = get_transaction_by_amout(min_amount, max_amount, valid_transactions, filter_summary)
+
+    filter_summary['final_count'] = len(valid_transactions)
+
+    return valid_transactions, invalid_count, filter_summary
 
 
-def validate_transaction(transaction):
-    """
-    Validate a single transaction
-    Returns (is_valid, reason)
-    """
-    # Check required fields
-    required_fields = ['TransactionID', 'ProductID', 'CustomerID', 'Quantity', 'UnitPrice']
-    
-    for field in required_fields:
-        if field not in transaction or not transaction[field]:
-            return False, f"Missing required field: {field}"
-    
-    # Validate Quantity > 0
-    try:
-        quantity = float(str(transaction['Quantity']).replace(',', ''))
-        if quantity <= 0:
-            return False, "Quantity must be > 0"
-    except (ValueError, TypeError):
-        return False, "Invalid Quantity format"
-    
-    # Validate UnitPrice > 0
-    try:
-        unit_price = float(str(transaction['UnitPrice']).replace(',', ''))
-        if unit_price <= 0:
-            return False, "UnitPrice must be > 0"
-    except (ValueError, TypeError):
-        return False, "Invalid UnitPrice format"
-    
-    # Validate TransactionID starts with 'T'
-    if not str(transaction['TransactionID']).startswith('T'):
-        return False, "TransactionID must start with 'T'"
-    
-    # Validate ProductID starts with 'P'
-    if not str(transaction['ProductID']).startswith('P'):
-        return False, "ProductID must start with 'P'"
-    
-    # Validate CustomerID starts with 'C'
-    if not str(transaction['CustomerID']).startswith('C'):
-        return False, "CustomerID must start with 'C'"
-    
-    return True, "Valid"
+
+def get_trnsaction_by_region(region, valid_transactions):
+    region_transaction = []
+    for valid_transaction in valid_transactions:
+        if valid_transaction['Region'] == region:
+            region_transaction.append(valid_transaction)
+    return region_transaction
 
 
-def filter_by_region(transactions, region):
-    """
-    Filter transactions by specific region
-    """
-    return [t for t in transactions if t.get('Region', '').lower() == region.lower()]
-
-
-def filter_by_amount(transactions, min_amount=None, max_amount=None):
-    """
-    Filter transactions by amount range (Quantity * UnitPrice)
-    """
-    filtered = []
-    
+def get_valid_transaction(transactions):
+    valid_transactions = []
+    invalid_count = 0
     for transaction in transactions:
         try:
-            quantity = float(str(transaction['Quantity']).replace(',', ''))
-            unit_price = float(str(transaction['UnitPrice']).replace(',', ''))
-            amount = quantity * unit_price
-            
-            # Check min_amount
-            if min_amount is not None and amount < min_amount:
+            if (transaction['Quantity'] <= 0 or
+                transaction['UnitPrice'] <= 0 or
+                not transaction['ProductID'].startswith('P') or
+                not transaction['TransactionID'].startswith('T') or
+                not transaction['CustomerID'].startswith('C')):
+                invalid_count += 1
                 continue
-            
-            # Check max_amount
-            if max_amount is not None and amount > max_amount:
-                continue
-            
-            filtered.append(transaction)
-        except (ValueError, TypeError, KeyError):
+        except KeyError:
+            invalid_count += 1
             continue
-    
-    return filtered
+        valid_transactions.append(transaction)
+    return invalid_count, valid_transactions
 
-
-def get_available_regions(transactions):
-    """
-    Get list of unique regions from transactions
-    """
-    regions = set()
-    for transaction in transactions:
-        region = transaction.get('Region', '')
-        if region:
-            regions.add(region)
-    return sorted(list(regions))
-
-
-def get_transaction_amount_range(transactions):
-    """
-    Get min and max transaction amounts
-    Returns dict with 'min' and 'max' keys
-    """
-    amounts = []
-    
-    for transaction in transactions:
-        try:
-            quantity = float(str(transaction['Quantity']).replace(',', ''))
-            unit_price = float(str(transaction['UnitPrice']).replace(',', ''))
-            amount = quantity * unit_price
-            amounts.append(amount)
-        except (ValueError, TypeError, KeyError):
+def get_transaction_by_amout(min_amount, max_amount, valid_transactions, filter_summary):
+    before_count = len(valid_transactions)
+    filter_by_amount = []
+    for transaction in valid_transactions:
+        amount = transaction['Quantity'] * transaction['UnitPrice']
+        if min_amount is not None and amount < min_amount:
             continue
-    
-    if not amounts:
-        return {'min': 0, 'max': 0}
-    
-    return {
-        'min': min(amounts),
-        'max': max(amounts)
-    }
+        if max_amount is not None and amount > max_amount:
+            continue
+        filter_by_amount.append(transaction)
 
-
-def print_filter_summary(filter_summary):
-    """
-    Print detailed filter summary
-    """
-    print("\n" + "="*50)
-    print("FILTER SUMMARY")
-    print("="*50)
-    print(f"Total input: {filter_summary['total_input']}")
-    print(f"Invalid: {filter_summary['invalid']}")
-    print(f"Filtered by region: {filter_summary['filtered_by_region']}")
-    print(f"Filtered by amount: {filter_summary['filtered_by_amount']}")
-    print(f"Final count: {filter_summary['final_count']}")
-    print("="*50)
+    valid_transactions = filter_by_amount
+    filter_summary['filtered_by_amount'] = before_count - len(valid_transactions)
+    return valid_transactions
